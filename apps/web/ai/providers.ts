@@ -64,6 +64,14 @@ if (env.AZURE_BASE_URL) {
 const azure = createAzure(azureConfig)
 
 /**
+ * OpenAI configuration for standard OpenAI API
+ */
+const openai = createOpenAI({
+  apiKey: env.OPENAI_API_KEY || '',
+  compatibility: 'strict',
+})
+
+/**
  * OpenRouter configuration for Claude and Gemini models
  */
 const openrouterConfig = {
@@ -94,6 +102,10 @@ const databricksClaude = createOpenAI({
 export const myProvider = customProvider({
   languageModels: {
 
+    // OpenAI models (standard OpenAI API)
+    'chat-model-openai-gpt4': openai('gpt-4o'),
+    'chat-model-openai-gpt4-mini': openai('gpt-4o-mini'),
+    
     // Azure OpenAI models
     'chat-model-reasoning-azure': azure(env.AZURE_DEPLOYMENT_NAME || 'o4-mini'),
     'chat-model-reasoning-azure-mini': azure('gpt-4.1-mini'),
