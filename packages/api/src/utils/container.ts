@@ -33,7 +33,8 @@ import {
   type SandboxProviderType,
   CONTAINER_TIMEOUTS,
   TEMPLATE_MAPPINGS,
-  getTimeoutForUserTier
+  getTimeoutForUserTier,
+  E2BSandbox
 } from '@libra/sandbox'
 // Keep E2B import as fallback
 import Sandbox from 'e2b'
@@ -155,10 +156,13 @@ export async function getSandboxInstance(
 ): Promise<any> {
   const provider = getDefaultSandboxProvider()
 
+  console.log(`[getSandboxInstance] Operation: ${operation}, Template/ID: ${templateOrId}, Provider: ${provider}`)
+
   const factoryAvailable = await ensureSandboxFactory()
 
   if (factoryAvailable) {
     try {
+      console.log(`[getSandboxInstance] Using abstraction layer (factory available)`)
       const factory = getSandboxFactory()
       let sandbox: ISandbox
 
@@ -185,30 +189,43 @@ export async function getSandboxInstance(
           throw new Error(`Unknown sandbox operation: ${operation}`)
       }
 
+      console.log(`[getSandboxInstance] Successfully created/connected sandbox via abstraction layer: ${sandbox.id}`)
       return sandbox
     } catch (error) {
+      console.error(`[getSandboxInstance] Abstraction layer failed, falling back to native E2B:`, error)
       // Abstraction layer operation failed, falling back to E2B
     }
+  } else {
+    console.log(`[getSandboxInstance] Factory not available, using native E2B directly`)
   }
 
-  let sandbox: any
+  let nativeSandbox: any
   try {
+    console.log(`[getSandboxInstance] Using native E2B SDK`)
     switch (operation) {
       case 'create':
-        sandbox = await Sandbox.create(templateOrId, { timeoutMs: options.timeoutMs })
+        nativeSandbox = await Sandbox.create(templateOrId, { timeoutMs: options.timeoutMs })
         break
       case 'connect':
-        sandbox = await Sandbox.connect(templateOrId)
+        nativeSandbox = await Sandbox.connect(templateOrId)
         break
       case 'resume':
-        sandbox = await Sandbox.resume(templateOrId, { timeoutMs: options.timeoutMs })
+        nativeSandbox = await Sandbox.resume(templateOrId, { timeoutMs: options.timeoutMs })
         break
       default:
         throw new Error(`Unknown sandbox operation: ${operation}`)
     }
 
-    return sandbox
+    const sandboxId = nativeSandbox.sandboxId || nativeSandbox.id
+    console.log(`[getSandboxInstance] Successfully created/connected sandbox via native E2B: ${sandboxId}`)
+    
+    // Wrap native E2B instance in E2BSandbox to ensure ISandbox interface compliance
+    const wrappedSandbox = new E2BSandbox(sandboxId, nativeSandbox)
+    console.log(`[getSandboxInstance] Wrapped native E2B sandbox in E2BSandbox class`)
+    
+    return wrappedSandbox
   } catch (error) {
+    console.error(`[getSandboxInstance] Native E2B also failed:`, error)
     throw error
   }
 }
@@ -363,6 +380,8 @@ async function syncFilesToContainer(container: ISandbox, messageHistory: string)
             : JSON.stringify(fileInfo.content),
       }))
 
+    console.log(`[syncFilesToContainer] Preparing to write ${filesToWrite.length} files`)
+
     // Check if container is an abstraction layer instance (ISandbox)
     if (container.writeFiles && typeof container.writeFiles === 'function') {
       // Use abstraction layer method
@@ -372,6 +391,7 @@ async function syncFilesToContainer(container: ISandbox, messageHistory: string)
         isBinary: false
       }))
 
+      console.log(`[syncFilesToContainer] Writing files using ISandbox.writeFiles`)
       const result = await container.writeFiles(sandboxFiles)
 
       // Check for errors in the result
@@ -380,23 +400,32 @@ async function syncFilesToContainer(container: ISandbox, messageHistory: string)
           .filter((r: { success: boolean }) => !r.success)
           .map((r: { path?: string; error?: string }) => `${r.path || 'Unknown path'}: ${r.error || 'Unknown error'}`)
           .join(', ')
+        console.error(`[syncFilesToContainer] File write failed:`, errorDetails)
         throw new Error(`Failed to sync files: ${errorDetails}`)
       }
+      console.log(`[syncFilesToContainer] Successfully wrote ${result.successCount} files`)
     }
     // Fallback for native E2B container
-    // else if (container.files && container.files.write) {
-    //   await container.files.write(filesToWrite)
-    // }
+    else if (container.files && container.files.write) {
+      console.log(`[syncFilesToContainer] Writing files using native E2B container.files.write`)
+      await container.files.write(filesToWrite)
+      console.log(`[syncFilesToContainer] Successfully wrote ${filesToWrite.length} files using native E2B`)
+    }
     // No supported file writing method
     else {
+      console.error(`[syncFilesToContainer] Container does not support file writing operations`)
+      console.error(`[syncFilesToContainer] Container type:`, typeof container)
+      console.error(`[syncFilesToContainer] Container keys:`, Object.keys(container || {}))
       throw new Error('Container does not support file writing operations')
     }
   })
 
   if (syncError) {
+    console.error(`[syncFilesToContainer] Sync error:`, syncError)
     throw new TRPCError({
       code: 'INTERNAL_SERVER_ERROR',
-      message: 'Failed to sync files to container',
+      message: `Failed to sync files to container: ${syncError.message || 'Unknown error'}`,
+      cause: syncError,
     })
   }
 }

@@ -296,9 +296,17 @@ export class E2BSandbox extends BaseSandbox {
       data: file.content,
     }))
 
+    console.log(`[E2BSandbox] Attempting to write ${files.length} files to container ${this.id}`)
     const [, error] = await tryCatch(async () => this.container.files.write(fileData))
 
     if (error) {
+      console.error(`[E2BSandbox] Failed to write files to container ${this.id}:`, error)
+      console.error(`[E2BSandbox] Error details:`, {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        cause: error.cause
+      })
       return {
         success: false,
         results: files.map((file) => ({
@@ -312,6 +320,7 @@ export class E2BSandbox extends BaseSandbox {
       }
     }
 
+    console.log(`[E2BSandbox] Successfully wrote ${files.length} files to container ${this.id}`)
     return {
       success: true,
       results: files.map((file) => ({
